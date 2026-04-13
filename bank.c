@@ -19,6 +19,8 @@ pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 sem_t customer_arrived[NUM_TELLERS];   /* customer → teller: "I'm here"       */
 sem_t teller_asks_txn[NUM_TELLERS];   /* teller  → customer: "what txn?"     */
 sem_t customer_gives_txn[NUM_TELLERS];/* customer → teller: "here it is"     */
+sem_t teller_done[NUM_TELLERS];       /* teller  → customer: "all done"      */
+sem_t customer_gone[NUM_TELLERS];     /* customer → teller: "I'm leaving"    */
 int serving_customer[NUM_TELLERS];    /* which customer id is at teller i    */
 int txn_type[NUM_TELLERS];            /* 0 = deposit, 1 = withdraw           */
 
@@ -83,6 +85,14 @@ void *teller_thread(void *arg)
         usleep((rand() % 41 + 10) * 1000);
         printf("Teller %d [Teller %d]: leaving safe\n", id, id);
         sem_post(&safe_sem);
+
+        /* notify customer the transaction is complete */
+        printf("Teller %d [Customer %d]: transaction complete\n", id, cid);
+        sem_post(&teller_done[id]);
+
+        /* wait for customer to leave before serving next */
+        sem_wait(&customer_gone[id]);
+        printf("Teller %d [Customer %d]: customer has left\n", id, cid);
     }
 
     printf("Teller %d [Teller %d]: done for the day\n", id, id);
@@ -126,6 +136,13 @@ void *customer_thread(void *arg)
            id, tid, txn ? "withdraw" : "deposit");
     sem_post(&customer_gives_txn[tid]);
 
+    /* wait for teller to finish the transaction */
+    sem_wait(&teller_done[tid]);
+
+    /* leave the bank */
+    printf("Customer %d [Customer %d]: leaving bank\n", id, id);
+    sem_post(&customer_gone[tid]);
+
     return NULL;
 }
 
@@ -139,6 +156,8 @@ int main(void)
         sem_init(&customer_arrived[i],   0, 0);
         sem_init(&teller_asks_txn[i],    0, 0);
         sem_init(&customer_gives_txn[i], 0, 0);
+        sem_init(&teller_done[i],        0, 0);
+        sem_init(&customer_gone[i],      0, 0);
     }
     pthread_t tellers[NUM_TELLERS];
     int teller_ids[NUM_TELLERS];
