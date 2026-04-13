@@ -26,6 +26,7 @@ int txn_type[NUM_TELLERS];            /* 0 = deposit, 1 = withdraw           */
 
 sem_t manager_sem; /* only 1 teller with manager at a time */
 sem_t safe_sem;    /* max 2 tellers in safe at once       */
+sem_t door_sem;    /* max 2 customers through door at once */
 
 int bank_closed = 0;
 
@@ -107,8 +108,18 @@ void *customer_thread(void *arg)
     printf("Customer %d [Customer %d]: decides to %s\n",
            id, id, txn ? "withdraw" : "deposit");
 
+    /* travel to the bank: rand()%101 gives 0–100, *1000 converts ms to us */
+    printf("Customer %d [Customer %d]: going to bank\n", id, id);
+    usleep((rand() % 101) * 1000);
+    printf("Customer %d [Customer %d]: arrived at bank\n", id, id);
+
     sem_wait(&bank_open);
-    printf("Customer %d [Customer %d]: enters bank\n", id, id);
+
+    /* enter through the door (max 2 customers at a time) */
+    printf("Customer %d [Customer %d]: entering bank\n", id, id);
+    sem_wait(&door_sem);
+    sem_post(&door_sem);
+    printf("Customer %d [Customer %d]: in line\n", id, id);
 
     /* wait for a free teller */
     sem_wait(&teller_free);
@@ -154,6 +165,7 @@ int main(void)
     sem_init(&safe_sem,    0, 2);
     sem_init(&open_sem,    0, 1); /* binary semaphore acting as mutex */
     sem_init(&queue_sem,   0, 1); /* binary semaphore acting as mutex */
+    sem_init(&door_sem,    0, 2); /* 2 customers through door at once */
     for (int i = 0; i < NUM_TELLERS; i++) {
         sem_init(&customer_arrived[i],   0, 0);
         sem_init(&teller_asks_txn[i],    0, 0);
