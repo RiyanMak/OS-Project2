@@ -9,12 +9,12 @@
 
 sem_t bank_open;
 int tellers_ready = 0;
-pthread_mutex_t open_mutex = PTHREAD_MUTEX_INITIALIZER;
+sem_t open_sem;    /* binary semaphore, protects tellers_ready (init 1) */
 
 sem_t teller_free;
 int free_queue[NUM_TELLERS];
 int free_queue_size = 0;
-pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+sem_t queue_sem;   /* binary semaphore, protects free_queue (init 1)    */
 
 sem_t customer_arrived[NUM_TELLERS];   /* customer → teller: "I'm here"       */
 sem_t teller_asks_txn[NUM_TELLERS];   /* teller  → customer: "what txn?"     */
@@ -34,20 +34,20 @@ void *teller_thread(void *arg)
     int id = *(int *)arg;
     printf("Teller %d [Teller %d]: ready to serve customers\n", id, id);
 
-    pthread_mutex_lock(&open_mutex);
+    sem_wait(&open_sem);
     tellers_ready++;
     if (tellers_ready == NUM_TELLERS) {
         printf("Teller %d [Teller %d]: all tellers ready, opening bank\n", id, id);
         for (int i = 0; i < NUM_CUSTOMERS; i++)
             sem_post(&bank_open);
     }
-    pthread_mutex_unlock(&open_mutex);
+    sem_post(&open_sem);
 
     while (1) {
         /* add self to the free queue and signal customers */
-        pthread_mutex_lock(&queue_mutex);
+        sem_wait(&queue_sem);
         free_queue[free_queue_size++] = id;
-        pthread_mutex_unlock(&queue_mutex);
+        sem_post(&queue_sem);
         sem_post(&teller_free);
 
         /* wait for a customer to arrive */
@@ -113,12 +113,12 @@ void *customer_thread(void *arg)
     /* wait for a free teller */
     sem_wait(&teller_free);
 
-    pthread_mutex_lock(&queue_mutex);
+    sem_wait(&queue_sem);
     int tid = free_queue[0];
     for (int i = 0; i < free_queue_size - 1; i++)
         free_queue[i] = free_queue[i + 1];
     free_queue_size--;
-    pthread_mutex_unlock(&queue_mutex);
+    sem_post(&queue_sem);
 
     printf("Customer %d [Teller %d]: selects teller\n", id, tid);
 
@@ -152,6 +152,8 @@ int main(void)
     sem_init(&teller_free, 0, 0);
     sem_init(&manager_sem, 0, 1);
     sem_init(&safe_sem,    0, 2);
+    sem_init(&open_sem,    0, 1); /* binary semaphore acting as mutex */
+    sem_init(&queue_sem,   0, 1); /* binary semaphore acting as mutex */
     for (int i = 0; i < NUM_TELLERS; i++) {
         sem_init(&customer_arrived[i],   0, 0);
         sem_init(&teller_asks_txn[i],    0, 0);
