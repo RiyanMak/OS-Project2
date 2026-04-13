@@ -23,6 +23,7 @@ int serving_customer[NUM_TELLERS];    /* which customer id is at teller i    */
 int txn_type[NUM_TELLERS];            /* 0 = deposit, 1 = withdraw           */
 
 sem_t manager_sem; /* only 1 teller with manager at a time */
+sem_t safe_sem;    /* max 2 tellers in safe at once       */
 
 int bank_closed = 0;
 
@@ -68,10 +69,20 @@ void *teller_thread(void *arg)
             printf("Teller %d [Teller %d]: going to manager\n", id, id);
             sem_wait(&manager_sem);
             printf("Teller %d [Teller %d]: with manager\n", id, id);
-            usleep((rand() % 26 + 5) * 1000);  /* 5–30 ms */
+            /* rand()%26 gives 0–25, +5 shifts to 5–30, *1000 converts ms to us */
+            usleep((rand() % 26 + 5) * 1000);
             printf("Teller %d [Teller %d]: done with manager\n", id, id);
             sem_post(&manager_sem);
         }
+
+        /* go to the safe to perform the transaction (max 2 tellers inside) */
+        printf("Teller %d [Teller %d]: going to safe\n", id, id);
+        sem_wait(&safe_sem);
+        printf("Teller %d [Teller %d]: in safe\n", id, id);
+        /* rand()%41 gives 0–40, +10 shifts to 10–50, *1000 converts ms to us */
+        usleep((rand() % 41 + 10) * 1000);
+        printf("Teller %d [Teller %d]: leaving safe\n", id, id);
+        sem_post(&safe_sem);
     }
 
     printf("Teller %d [Teller %d]: done for the day\n", id, id);
@@ -81,7 +92,8 @@ void *teller_thread(void *arg)
 void *customer_thread(void *arg)
 {
     int id = *(int *)arg;
-    int txn = rand() % 2;  /* 0 = deposit, 1 = withdraw */
+    /* rand()%2 gives 0 or 1 randomly: 0 = deposit, 1 = withdraw */
+    int txn = rand() % 2;
     printf("Customer %d [Customer %d]: decides to %s\n",
            id, id, txn ? "withdraw" : "deposit");
 
@@ -122,6 +134,7 @@ int main(void)
     sem_init(&bank_open,   0, 0);
     sem_init(&teller_free, 0, 0);
     sem_init(&manager_sem, 0, 1);
+    sem_init(&safe_sem,    0, 2);
     for (int i = 0; i < NUM_TELLERS; i++) {
         sem_init(&customer_arrived[i],   0, 0);
         sem_init(&teller_asks_txn[i],    0, 0);
