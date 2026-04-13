@@ -9,6 +9,11 @@ sem_t bank_open;
 int tellers_ready = 0;
 pthread_mutex_t open_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+sem_t teller_free;
+int free_queue[NUM_TELLERS];
+int free_queue_size = 0;
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void *teller_thread(void *arg)
 {
     int id = *(int *)arg;
@@ -23,6 +28,12 @@ void *teller_thread(void *arg)
     }
     pthread_mutex_unlock(&open_mutex);
 
+    /* add self to the free queue and signal customers */
+    pthread_mutex_lock(&queue_mutex);
+    free_queue[free_queue_size++] = id;
+    pthread_mutex_unlock(&queue_mutex);
+    sem_post(&teller_free);
+
     return NULL;
 }
 
@@ -33,12 +44,25 @@ void *customer_thread(void *arg)
     sem_wait(&bank_open);
     printf("Customer %d [Customer %d]: enters bank\n", id, id);
 
+    /* wait for a free teller */
+    sem_wait(&teller_free);
+
+    pthread_mutex_lock(&queue_mutex);
+    int tid = free_queue[0];
+    for (int i = 0; i < free_queue_size - 1; i++)
+        free_queue[i] = free_queue[i + 1];
+    free_queue_size--;
+    pthread_mutex_unlock(&queue_mutex);
+
+    printf("Customer %d [Teller %d]: selects teller\n", id, tid);
+
     return NULL;
 }
 
 int main(void)
 {
     sem_init(&bank_open, 0, 0);
+    sem_init(&teller_free, 0, 0);
     pthread_t tellers[NUM_TELLERS];
     int teller_ids[NUM_TELLERS];
     for (int i = 0; i < NUM_TELLERS; i++) {
