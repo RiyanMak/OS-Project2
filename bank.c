@@ -14,6 +14,11 @@ int free_queue[NUM_TELLERS];
 int free_queue_size = 0;
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+sem_t customer_arrived[NUM_TELLERS]; /* customer → teller: "I'm here" */
+int serving_customer[NUM_TELLERS];   /* which customer id is at teller i */
+
+int bank_closed = 0;
+
 void *teller_thread(void *arg)
 {
     int id = *(int *)arg;
@@ -28,12 +33,22 @@ void *teller_thread(void *arg)
     }
     pthread_mutex_unlock(&open_mutex);
 
-    /* add self to the free queue and signal customers */
-    pthread_mutex_lock(&queue_mutex);
-    free_queue[free_queue_size++] = id;
-    pthread_mutex_unlock(&queue_mutex);
-    sem_post(&teller_free);
+    while (1) {
+        /* add self to the free queue and signal customers */
+        pthread_mutex_lock(&queue_mutex);
+        free_queue[free_queue_size++] = id;
+        pthread_mutex_unlock(&queue_mutex);
+        sem_post(&teller_free);
 
+        /* wait for a customer to arrive */
+        sem_wait(&customer_arrived[id]);
+        if (bank_closed) break;
+
+        int cid = serving_customer[id];
+        printf("Teller %d [Customer %d]: serving customer\n", id, cid);
+    }
+
+    printf("Teller %d [Teller %d]: done for the day\n", id, id);
     return NULL;
 }
 
@@ -56,6 +71,11 @@ void *customer_thread(void *arg)
 
     printf("Customer %d [Teller %d]: selects teller\n", id, tid);
 
+    /* introduce self to the teller */
+    serving_customer[tid] = id;
+    printf("Customer %d [Teller %d]: introduces self to teller\n", id, tid);
+    sem_post(&customer_arrived[tid]);
+
     return NULL;
 }
 
@@ -63,6 +83,8 @@ int main(void)
 {
     sem_init(&bank_open, 0, 0);
     sem_init(&teller_free, 0, 0);
+    for (int i = 0; i < NUM_TELLERS; i++)
+        sem_init(&customer_arrived[i], 0, 0);
     pthread_t tellers[NUM_TELLERS];
     int teller_ids[NUM_TELLERS];
     for (int i = 0; i < NUM_TELLERS; i++) {
@@ -77,11 +99,18 @@ int main(void)
         pthread_create(&customers[i], NULL, customer_thread, &customer_ids[i]);
     }
 
-    for (int i = 0; i < NUM_TELLERS; i++)
-        pthread_join(tellers[i], NULL);
-
+    /* wait for all customers to finish */
     for (int i = 0; i < NUM_CUSTOMERS; i++)
         pthread_join(customers[i], NULL);
 
+    /* shut down tellers */
+    bank_closed = 1;
+    for (int i = 0; i < NUM_TELLERS; i++)
+        sem_post(&customer_arrived[i]);
+
+    for (int i = 0; i < NUM_TELLERS; i++)
+        pthread_join(tellers[i], NULL);
+
+    printf("Bank is now closed.\n");
     return 0;
 }
