@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <unistd.h>
 
 #define NUM_TELLERS   3
 #define NUM_CUSTOMERS 50
@@ -20,6 +21,8 @@ sem_t teller_asks_txn[NUM_TELLERS];   /* teller  → customer: "what txn?"     *
 sem_t customer_gives_txn[NUM_TELLERS];/* customer → teller: "here it is"     */
 int serving_customer[NUM_TELLERS];    /* which customer id is at teller i    */
 int txn_type[NUM_TELLERS];            /* 0 = deposit, 1 = withdraw           */
+
+sem_t manager_sem; /* only 1 teller with manager at a time */
 
 int bank_closed = 0;
 
@@ -59,6 +62,16 @@ void *teller_thread(void *arg)
         sem_wait(&customer_gives_txn[id]);
         printf("Teller %d [Customer %d]: received %s request\n",
                id, cid, txn_type[id] ? "withdrawal" : "deposit");
+
+        /* withdrawal requires manager approval */
+        if (txn_type[id] == 1) {
+            printf("Teller %d [Teller %d]: going to manager\n", id, id);
+            sem_wait(&manager_sem);
+            printf("Teller %d [Teller %d]: with manager\n", id, id);
+            usleep((rand() % 26 + 5) * 1000);  /* 5–30 ms */
+            printf("Teller %d [Teller %d]: done with manager\n", id, id);
+            sem_post(&manager_sem);
+        }
     }
 
     printf("Teller %d [Teller %d]: done for the day\n", id, id);
@@ -106,8 +119,9 @@ void *customer_thread(void *arg)
 
 int main(void)
 {
-    sem_init(&bank_open, 0, 0);
+    sem_init(&bank_open,   0, 0);
     sem_init(&teller_free, 0, 0);
+    sem_init(&manager_sem, 0, 1);
     for (int i = 0; i < NUM_TELLERS; i++) {
         sem_init(&customer_arrived[i],   0, 0);
         sem_init(&teller_asks_txn[i],    0, 0);
