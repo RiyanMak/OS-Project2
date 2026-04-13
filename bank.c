@@ -1,25 +1,44 @@
 #include <stdio.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 #define NUM_TELLERS   3
 #define NUM_CUSTOMERS 50
+
+sem_t bank_open;
+int tellers_ready = 0;
+pthread_mutex_t open_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void *teller_thread(void *arg)
 {
     int id = *(int *)arg;
     printf("Teller %d [Teller %d]: ready to serve customers\n", id, id);
+
+    pthread_mutex_lock(&open_mutex);
+    tellers_ready++;
+    if (tellers_ready == NUM_TELLERS) {
+        printf("Teller %d [Teller %d]: all tellers ready, opening bank\n", id, id);
+        for (int i = 0; i < NUM_CUSTOMERS; i++)
+            sem_post(&bank_open);
+    }
+    pthread_mutex_unlock(&open_mutex);
+
     return NULL;
 }
 
 void *customer_thread(void *arg)
 {
     int id = *(int *)arg;
-    printf("Customer %d [Customer %d]: created\n", id, id);
+
+    sem_wait(&bank_open);
+    printf("Customer %d [Customer %d]: enters bank\n", id, id);
+
     return NULL;
 }
 
 int main(void)
 {
+    sem_init(&bank_open, 0, 0);
     pthread_t tellers[NUM_TELLERS];
     int teller_ids[NUM_TELLERS];
     for (int i = 0; i < NUM_TELLERS; i++) {
