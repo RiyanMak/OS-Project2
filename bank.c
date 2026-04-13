@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <semaphore.h>
 
@@ -14,8 +15,11 @@ int free_queue[NUM_TELLERS];
 int free_queue_size = 0;
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-sem_t customer_arrived[NUM_TELLERS]; /* customer → teller: "I'm here" */
-int serving_customer[NUM_TELLERS];   /* which customer id is at teller i */
+sem_t customer_arrived[NUM_TELLERS];   /* customer → teller: "I'm here"       */
+sem_t teller_asks_txn[NUM_TELLERS];   /* teller  → customer: "what txn?"     */
+sem_t customer_gives_txn[NUM_TELLERS];/* customer → teller: "here it is"     */
+int serving_customer[NUM_TELLERS];    /* which customer id is at teller i    */
+int txn_type[NUM_TELLERS];            /* 0 = deposit, 1 = withdraw           */
 
 int bank_closed = 0;
 
@@ -46,6 +50,15 @@ void *teller_thread(void *arg)
 
         int cid = serving_customer[id];
         printf("Teller %d [Customer %d]: serving customer\n", id, cid);
+
+        /* ask for the transaction */
+        printf("Teller %d [Customer %d]: asks for transaction type\n", id, cid);
+        sem_post(&teller_asks_txn[id]);
+
+        /* wait for customer to provide it */
+        sem_wait(&customer_gives_txn[id]);
+        printf("Teller %d [Customer %d]: received %s request\n",
+               id, cid, txn_type[id] ? "withdrawal" : "deposit");
     }
 
     printf("Teller %d [Teller %d]: done for the day\n", id, id);
@@ -55,6 +68,9 @@ void *teller_thread(void *arg)
 void *customer_thread(void *arg)
 {
     int id = *(int *)arg;
+    int txn = rand() % 2;  /* 0 = deposit, 1 = withdraw */
+    printf("Customer %d [Customer %d]: decides to %s\n",
+           id, id, txn ? "withdraw" : "deposit");
 
     sem_wait(&bank_open);
     printf("Customer %d [Customer %d]: enters bank\n", id, id);
@@ -76,6 +92,15 @@ void *customer_thread(void *arg)
     printf("Customer %d [Teller %d]: introduces self to teller\n", id, tid);
     sem_post(&customer_arrived[tid]);
 
+    /* wait for teller to ask for transaction */
+    sem_wait(&teller_asks_txn[tid]);
+
+    /* tell the teller the transaction type */
+    txn_type[tid] = txn;
+    printf("Customer %d [Teller %d]: tells teller to %s\n",
+           id, tid, txn ? "withdraw" : "deposit");
+    sem_post(&customer_gives_txn[tid]);
+
     return NULL;
 }
 
@@ -83,8 +108,11 @@ int main(void)
 {
     sem_init(&bank_open, 0, 0);
     sem_init(&teller_free, 0, 0);
-    for (int i = 0; i < NUM_TELLERS; i++)
-        sem_init(&customer_arrived[i], 0, 0);
+    for (int i = 0; i < NUM_TELLERS; i++) {
+        sem_init(&customer_arrived[i],   0, 0);
+        sem_init(&teller_asks_txn[i],    0, 0);
+        sem_init(&customer_gives_txn[i], 0, 0);
+    }
     pthread_t tellers[NUM_TELLERS];
     int teller_ids[NUM_TELLERS];
     for (int i = 0; i < NUM_TELLERS; i++) {
