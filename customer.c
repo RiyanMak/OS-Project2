@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <semaphore.h>
 
 void* customer(void *arg){
 
@@ -12,13 +13,20 @@ void* customer(void *arg){
 
 int main () {
 
-    pthread_t customerId;
+    pthread_t customerThread;
+
+    int customerNumber = 1;
     
-    for(int i = 1; i <= 50; i++){
-        int customerArg = i;
-        pthread_create(&customerId, NULL, customer, &customerArg);
-        pthread_join(customerId, NULL);
-    }
+    // for(int i = 1; i <= 50; i++){
+    //     int customerArg = i;
+    //     pthread_create(&customerId, NULL, customer, &customerArg);
+
+    // }
+
+    pthread_create(&customerThread, NULL, customer, &customerNumber);
+
+
+    // pthread_join(customerId, NULL);
 
     return 0;
 }
